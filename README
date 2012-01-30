@@ -1,0 +1,102 @@
+golpy(1)
+==========
+
+NAME
+----
+pyshell - A Conway's Game of Life Simulator written in Python
+
+SYNOPSIS
+--------
+*golpy* [*-h* | *--help*] [*--no-gpu*] [*--n*] [*--m*]
+
+DESCRIPTION
+-----------
+*golpy* is an awesome Conway's Game of Life simulator written in Python.
+It uses key binding combinations similar to vim key binding. It can 
+improve performance using GPU support. For this you need to install 
+pycuda library. With GPU support the grid must be bounded (default is 
+500x500).
+
+OPTIONS
+-------
+*--no-gpu*::
+    Disable GPU support.
+*--n*::
+    Number of rows of the grid.
+*--m*::
+    Number of columns of the grid.
+
+KEY BINDINGS
+------------
+Navigation
+~~~~~~~~~~
+The navigation is vim-like [*cntrl+*]'hjkl'.
+Zoom
+~~~~
+Use the keys '+'(zoom-in) ans '-'(zoom-out).
+Status 
+~~~~~~
+Press 'v' to see the status of the simulator. Press 'd' or 'u' to respectively
+slow down or speed up the simulator.
+
+MOUSE BINDINGS
+--------------
+Painting
+~~~~~~~~
+Click with left button mouse to paint. If the cell is already painted to alive,
+it will be switched to death.
+
+Applying Patterns
+~~~~~~~~~~~~~~~~~
+Click right button mouse and select one of the pattern that appears into the menu.
+Once selected put it into the grid with left button or click the right button to apply transformations such as rotation, flip horizontally, flip vertically to the pattern.
+
+Zoom
+~~~~
+Press *cntrl* button and then select an area of the grid to zoom-in.
+
+COPYRIGHT
+---------
+       Copyright  (C) 2008, 2009, 2010, 2011, 2012 Free  Software 
+       Foundation, Inc.
+
+       Permission  is  granted to make and distribute verbatim copies
+       of this document provided the copyright notice and  this  per‐
+       mission notice are preserved on all copies.
+
+       Permission is granted to copy and distribute modified versions
+       of this document under the conditions  for  verbatim  copying,
+       provided that the entire resulting derived work is distributed
+       under the terms of a permission notice identical to this one.
+
+       Permission is granted to copy and distribute  translations  of
+       this  document  into  another language, under the above condi‐
+       tions for  modified  versions,  except  that  this  permission
+       notice  may  be  stated  in a translation approved by the Free
+       Software Foundation.
+
+BUGS
+----
+	Of course there is no bug in *golpy*. But there may be unexpected behaviors.
+	Go to 'https://github.com/feels/golpy/issues' you can report directly
+	this unexpected behaviors.
+
+SEE ALSO
+--------
+*golly* - A simulator for Conway's Game of Life and other cellular automata
+
+AUTHORS
+-------
+Filippo Squillace <sqoox85@gmail.com>.
+
+WWW
+---
+http://github.com/feels/golpy
+
+Last words
+----------
+[verse, Dante Alighieri, from Divine Comedy]
+____________________________________________
+All hope abandon, ye who enter here!
+____________________________________________
+
