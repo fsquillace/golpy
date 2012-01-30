@@ -1,0 +1,599 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+"""
+Golpy - Game of Life Simulator 
+
+@author: Filippo Squillace
+@date: 03/12/2011
+"""
+
+import wx
+import pickle
+import types
+import argparse
+import numpy as np
+
+from mvc import Observer, Observable
+import patterns
+import ca
+
+class PlayerGrid(Observable, Observer):
+    def __init__(self, grid, timeout=50, bg='WHITE',\
+            default_screen_dim=(500,500)):
+
+        Observable.__init__(self)
+        grid.register(self)
+        self.grid = grid
+
+
+        self.bg = bg
+        self.view_status = False
+        self.view_grid = True
+        self.view_help = False
+        self.apply_pattern = False
+
+        # Initial position and dimension of the screen to start painting
+        self.screen_pos = (0, 0)
+
+        if grid.dim:
+            self.default_screen_dim = grid.dim
+        else:
+            self.default_screen_dim = default_screen_dim
+
+        self.screen_dim = self.default_screen_dim
+        self.sel_pos = (None, None)
+        self.sel_dim = (None, None)
+        
+        # State of the player
+        self.started = True
+        self.timeout = timeout
+        
+    def start(self, timeout=None):
+        if timeout:
+            self.timeout = timeout
+        if timeout<0:
+            timeout=0
+        self.started = True
+
+        Observable.notify(self)
+
+    def stop(self):
+        self.started = False
+
+        Observable.notify(self)
+
+    def flip_vertically(self):
+        if self.pattern is not None:
+            new_pattern = np.empty_like(self.pattern)
+            cols = self.pattern.shape[1]
+            for j in range(cols):
+                new_pattern[:, cols-1 - j] = self.pattern[:, j]
+        
+        self.pattern = new_pattern
+        Observable.notify(self)
+
+    def flip_horizontally(self):
+        if self.pattern is not None:
+            new_pattern = np.empty_like(self.pattern)
+            rows = self.pattern.shape[0]
+            for i in range(rows):
+                new_pattern[rows-1 - i, :] = self.pattern[i, :]
+        
+        self.pattern = new_pattern
+        Observable.notify(self)
+
+    def rotate(self):
+        if self.pattern is not None:
+            rows = self.pattern.shape[0]
+            cols = self.pattern.shape[1]
+            new_pattern = np.empty_like(self.pattern).reshape(cols, rows)
+            for i in range(cols):
+                new_pattern[cols-1 - i, :] = self.pattern[:, i]
+        
+        self.pattern = new_pattern
+        Observable.notify(self)
+
+    def call_pattern(self, pattern_path):
+        """
+        pattern_path is a tuple indicating the path up to the function
+        """
+        obj = globals()[pattern_path[0]]
+        for el in pattern_path[1:]:
+            obj = obj.__dict__[el]
+        if callable(obj):
+            self.pattern = obj()
+        
+
+    def set_sel_init_pos(self, x, y): 
+        self.sel_pos = (x, y)
+        self.sel_dim = (None, None)
+        Observable.notify(self)
+
+    def set_sel_final_pos(self, x, y):
+        self.sel_pos = ( min(self.sel_pos[0], x), \
+                min(self.sel_pos[1], y) )
+
+        max_pos =  ( max(self.sel_pos[0], x), \
+                max(self.sel_pos[1], y) )
+
+        self.sel_dim = (max_pos[0] - self.sel_pos[0] + 1, max_pos[1] -
+                self.sel_pos[1] + 1)
+
+        Observable.notify(self)
+
+    def clear_selection(self):
+        self.sel_pos = (None, None)
+        self.sel_dim = (None, None)
+
+    def get_selection(self):
+        return (self.sel_pos, self.sel_dim)
+
+    def update(self, *args, **kwargs):
+        Observable.notify(self)
+
+    def zoom_selected_area(self):
+        self.screen_pos = self.sel_pos
+        self.screen_dim = self.sel_dim
+        self.clear_selection()
+
+        Observable.notify(self)
+
+    def zoom_in(self, zoom):
+        ix, iy = self.screen_pos
+        h, w = self.screen_dim
+        gap = int(0.01*zoom*h)
+        self.screen_pos = (ix+gap, iy+gap)
+        self.screen_dim = (h-2*gap, w-2*gap)
+
+        Observable.notify(self)
+
+    def zoom_out(self):
+        if self.grid.dim:
+            self.screen_pos = (0, 0)
+            self.screen_dim = self.default_screen_dim
+        else:
+            ix, iy = self.screen_pos
+            h, w = self.screen_dim
+            gap = int(0.01*10*h)
+            self.screen_pos = (ix-gap, iy-gap)
+            self.screen_dim = (h+2*gap, w+2*gap)
+
+            
+        Observable.notify(self)
+    
+    def move_left(self, step):
+        iy = self.screen_pos[1]
+        if self.grid.dim and iy-step<0: # if grid bounded checks the range
+            return
+
+        iy = iy-step
+        self.screen_pos = (self.screen_pos[0], iy)
+        
+        Observable.notify(self)
+
+    def move_right(self, step):
+        fy = self.screen_pos[1]+self.screen_dim[1] -1
+        iy = self.screen_pos[1]
+
+        if self.grid.dim and fy+step>self.grid.dim[1]-1:
+            return
+
+        iy = iy+step
+        self.screen_pos = (self.screen_pos[0], iy)
+
+        Observable.notify(self)
+
+    def move_down(self, step):
+        fx = self.screen_pos[0]+self.screen_dim[0] -1
+        ix = self.screen_pos[0]
+        if self.grid.dim and fx+step>self.grid.dim[0]-1:
+            return
+
+        ix = ix+step
+        self.screen_pos = (ix, self.screen_pos[1])
+        
+        Observable.notify(self)
+
+    def move_up(self, step):
+        ix = self.screen_pos[0]
+        if self.grid.dim and ix-step<0: # if grid bounded checks the range
+            return
+
+        ix = ix-step
+        self.screen_pos = (ix, self.screen_pos[1])
+
+        Observable.notify(self)
+
+
+
+class GridFrame(wx.Frame):
+    def __init__(self, parent, player_grid):
+        super(GridFrame, self).__init__(parent, title='Game of Life Simulator - Golpy')
+        
+        
+        panel = GridPanel(self, player_grid)
+        # Set focus to the panel so as allowing receive events
+        panel.SetFocus()
+
+
+class GridPanel(wx.Panel, Observer):
+    def __init__(self, parent, player_grid):
+        super(GridPanel, self).__init__(parent, name='Game of Life Simulator - Golpy')
+        
+        self.pg = player_grid
+        player_grid.register(self)
+        
+        # Define the dimension of the cell
+        #self.g_width = float(self.Size.width)/self.m
+        #self.g_height = float(self.Size.height)/self.n
+        
+
+        self.Bind(wx.EVT_KEY_DOWN, self.onKeyPress)
+        self.Bind(wx.EVT_LEFT_DOWN, self.onMouseLeftPress)
+        self.Bind(wx.EVT_LEFT_UP, self.onMouseLeftRelease)
+        self.Bind(wx.EVT_MOTION, self.onMouseDrag)
+
+        self.pattern_menu = wx.Menu('patterns')
+        for m in patterns.modules:
+            # Add the module item
+            module_menu = wx.Menu(m)
+            self.pattern_menu.AppendMenu(-1, m, module_menu)
+            for k,v in patterns.__dict__[m].__dict__.items():
+                if isinstance(v, types.FunctionType):
+                    item = module_menu.Append(-1, k)
+                    self.Bind(wx.EVT_MENU, self.OnPatternItemSelected,item)
+
+        #for k,v in patterns.__dict__.items():
+            #if isinstance(v, types.ModuleType):
+                ## Add the module item
+                #module_menu = wx.Menu(k)
+                #self.pattern_menu.AppendMenu(-1, k, module_menu)
+                #for k2,v2 in v.__dict__.items():
+                    #if isinstance(v2, types.FunctionType):
+                        #item = module_menu.Append(-1, k2)
+                        #self.Bind(wx.EVT_MENU, self.OnPatternItemSelected,item)
+            #elif isinstance(v, types.FunctionType):
+                #item = self.pattern_menu.Append(-1, k)
+                #self.Bind(wx.EVT_MENU, self.OnPatternItemSelected,item)
+                #pass
+        
+        self.mod_menu = wx.Menu()
+        item = self.mod_menu.Append(0, "Flip Vertically")
+        self.Bind(wx.EVT_MENU, self.OnModItemSelected,item)
+        item = self.mod_menu.Append(1, "Flip Horizontally")
+        self.Bind(wx.EVT_MENU, self.OnModItemSelected,item)
+        item = self.mod_menu.Append(2, "Rotate 90°")
+        self.Bind(wx.EVT_MENU, self.OnModItemSelected,item)
+        
+
+        self.Bind(wx.EVT_CONTEXT_MENU,self.OnShowPopup)
+
+        self.Bind(wx.EVT_PAINT, self.onPaint)
+        #wx.FutureCall(2000, self.drawCell, 9, 0)
+
+        self.timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.onTimer, self.timer)
+        self.start(self.pg.timeout)
+
+        self.Centre()
+        self.Show()
+
+    ####################### CONTROLLER METHODS ################################
+
+
+    def start(self, timeout=None):
+        self.pg.start(timeout)
+        self.timer.Start(self.pg.timeout)
+
+    def stop(self):
+        self.pg.stop()
+        self.timer.Stop()
+
+    def toggle(self):
+        if not self.pg.started:
+            self.start()
+        else:
+            self.stop()
+
+
+
+    def get_grid_coords(self, event):
+        x, y = event.GetPosition()
+        x_pos = self.pg.screen_pos[0] + int(y/self.g_height)
+        y_pos = self.pg.screen_pos[1] + int(x/self.g_width)
+
+        return (x_pos, y_pos)
+
+    def OnShowPopup(self, event):
+        self.stop()
+        pos = event.GetPosition()
+        x, y = self.ScreenToClient(pos)
+
+        x_pos = self.pg.screen_pos[0] + int(y/self.g_height)
+        y_pos = self.pg.screen_pos[1] + int(x/self.g_width)
+
+        self.pg.set_sel_init_pos(x_pos, y_pos) 
+        if self.pg.apply_pattern:
+            self.PopupMenu(self.mod_menu, (x, y))
+        else:
+            self.PopupMenu(self.pattern_menu, (x, y))
+
+        event.Skip()
+
+
+    def OnPatternItemSelected(self, event):
+        item = self.pattern_menu.FindItemById(event.GetId())
+        funcname = item.GetText()
+        patt_path = [funcname]
+
+        m = item.GetMenu()
+        while(m is not None):
+            patt_path.append(m.GetTitle())
+            m = m.GetParent()
+
+        patt_path = tuple(reversed(patt_path))
+        self.pg.call_pattern(patt_path)
+        self.pg.apply_pattern = True
+    
+    def OnModItemSelected(self, event):
+        item = self.mod_menu.FindItemById(event.GetId())
+        if item.GetId()==0:
+            self.pg.flip_vertically()
+        elif item.GetId()==1:
+            self.pg.flip_horizontally()
+        elif item.GetId()==2:
+            self.pg.rotate()
+
+    def onMouseLeftPress(self, event):
+        x_pos, y_pos = self.get_grid_coords(event)
+        
+        if event.ControlDown():
+            # Applies initial point for Zoom in
+            self.pg.set_sel_init_pos(x_pos, y_pos)
+
+        elif self.pg.apply_pattern:
+            
+            self.pg.grid.apply(self.pg.pattern, *self.pg.sel_pos)
+            self.pg.apply_pattern = False
+
+        else:
+            self.stop()
+            self.pg.grid.toggle_cell(x_pos, y_pos)
+
+        event.Skip()
+
+    def onMouseLeftRelease(self, event):
+        x_pos, y_pos = self.get_grid_coords(event)
+
+        if event.ControlDown():
+            # Applies final point for Zoom in
+            self.pg.set_sel_final_pos(x_pos, y_pos)
+            self.pg.zoom_selected_area()
+       
+    def onMouseDrag(self, event):
+        
+        if event.LeftIsDown():
+            x_pos, y_pos = self.get_grid_coords(event)
+
+            if event.ControlDown():
+                self.pg.set_sel_final_pos(x_pos, y_pos)
+            else:
+                self.pg.clear_selection()
+
+                self.stop()
+                self.pg.grid.add_cell(x_pos, y_pos)
+
+        elif self.pg.apply_pattern:
+
+            x_pos, y_pos = self.get_grid_coords(event)
+            # Applies point for applying
+            self.pg.set_sel_init_pos(x_pos, y_pos)
+
+        event.Skip()
+
+    def onKeyPress(self, event):
+        keycode = event.GetKeyCode()
+        print "press:"+str(keycode)
+
+        if keycode == wx.WXK_RETURN:
+            self.toggle()
+        elif keycode == wx.WXK_SPACE:
+            self.stop()
+            self.pg.grid.next()
+        elif keycode == 85: # U
+            self.start(self.pg.timeout-5)
+        elif keycode == 68: # D
+            self.start(self.pg.timeout+5)
+        elif keycode == 86: # V
+            self.pg.view_status = not self.pg.view_status
+        elif keycode == 71: # G
+            self.pg.view_grid = not self.pg.view_grid
+        elif keycode == 0: # ?
+            self.pg.view_help = not self.pg.view_help
+        elif keycode == 67: # C
+            self.stop()
+            self.pg.grid.clear()
+        elif keycode == 43: # +
+            self.pg.zoom_in(10)
+        elif keycode == 45: # -
+            self.pg.zoom_out()
+        elif keycode == 72 or keycode == wx.WXK_LEFT: # H
+            if event.ControlDown():
+                self.pg.move_left(10)
+            else:
+                self.pg.move_left(1)
+        elif keycode == 76 or keycode == wx.WXK_RIGHT: # L
+            if event.ControlDown():
+                self.pg.move_right(10)
+            else:
+                self.pg.move_right(1)
+        elif keycode == 74 or keycode == wx.WXK_DOWN: # J
+            if event.ControlDown():
+                self.pg.move_down(10)
+            else:
+                self.pg.move_down(1)
+        elif keycode == 75 or keycode == wx.WXK_UP: # K
+            if event.ControlDown():
+                self.pg.move_up(10)
+            else:
+                self.pg.move_up(1)
+
+        elif keycode == 81: # Q
+            self.stop()
+            self.Parent.Close()
+        elif keycode == 83: # S
+            self.stop()
+            pickle.dump(self.pg.grid.get_state(), open("matrix.gol", "w"))
+            self.start()
+
+
+        event.Skip()
+
+
+    def onTimer(self, evt):
+        if self.pg.grid.is_done():
+            self.timer.Stop()
+        else:
+            self.pg.grid.next()
+
+    ####################### VIEW METHODS ################################
+    def update(self, *args, **kwargs):
+        self.Refresh()
+
+
+    def onPaint(self, e):
+        dc = wx.ClientDC(self)
+
+        # Screen data
+        scrpos = self.pg.screen_pos
+        scrdim = self.pg.screen_dim
+
+        # Selection data
+        selpos = self.pg.sel_pos
+        seldim = self.pg.sel_dim
+
+        self.g_width = float(self.Size.width)/scrdim[1]
+        self.g_height = float(self.Size.height)/scrdim[0]
+
+        # Draw Grid
+        if self.pg.view_grid:
+            dc.SetPen(wx.Pen('GRAY', 1, wx.SOLID))
+            # Draw horizontal lines
+            for y in range(0, scrdim[1]):
+                y = int(y*self.g_width)
+                dc.DrawLine(y, 0, y, self.Size.height)
+
+            # Draw vertical lines
+            for x in range(0, scrdim[0]):
+                x = int(x*self.g_height)
+                dc.DrawLine(0, x, self.Size.width, x)
+
+        # Draw Border
+        dc.SetPen(wx.Pen('DARK GRAY', 3, wx.SOLID))
+        dc.DrawLine(0, 0, self.Size.width, 0)
+        dc.DrawLine(0, self.Size.height, self.Size.width, self.Size.height)
+        dc.DrawLine(0, 0, 0, self.Size.height)
+        dc.DrawLine(self.Size.width, 0, self.Size.width, self.Size.height)
+
+        # Draw cells
+        view = self.pg.grid.slice(scrpos, scrdim)
+        for coords,value in view.items():
+            x,y = coords
+            self.drawCell(x, y, value)
+
+        # Draw Help
+        # TODO
+
+
+        # Draw Status
+        num_cells = self.pg.grid.get_num_cells()
+        if self.pg.view_status:
+            if self.pg.started:
+                st = 'Start'
+            else:
+                st = 'Stop'
+            dc.DrawText('Iterations:{0}\tTimeout:{1} msec\tStatus:{2}\tN.Cells:{3}'.format(\
+                    self.pg.grid.iteration, self.pg.timeout, st, num_cells), 10, self.Size.height-20 )
+        
+        
+        # Draw pattern
+        if self.pg.apply_pattern:
+            it = np.nditer(self.pg.pattern, flags=['multi_index'])
+            while not it.finished:
+                if it[0]:
+                    self.drawCell((selpos[0]-scrpos[0])+it.multi_index[0],\
+                            (selpos[1]-scrpos[1])+it.multi_index[1], it[0])
+                it.iternext()
+
+
+        # Draw Selected Area
+        dc.SetPen(wx.Pen('#4c4c4c', 2, wx.SHORT_DASH))
+        dc.SetBrush(wx.TRANSPARENT_BRUSH)
+        if selpos[0] and seldim[0]:
+            dc.DrawRectangle(int((selpos[1]-scrpos[1])*self.g_width),\
+                    int((selpos[0]-scrpos[0])*self.g_height),\
+                    int(seldim[1]*self.g_width+1),\
+                    int(seldim[0]*self.g_height+1))
+
+
+    def drawCell(self, x, y, value):
+        # Applies scaling to have values from 0.0 to 1.0
+        v = (1-float(value)/self.pg.grid.get_range())*255
+        dc = wx.ClientDC(self)
+        
+        dc.SetPen(wx.Pen(wx.Colour(v,v,v), 1, wx.SOLID))
+        dc.SetBrush(wx.Brush(wx.Colour(v,v,v)))
+        # Be careful! the coordinates are inverted in the model respect the
+        # usual representation. In the model x represents rows and y columns
+        dc.DrawRectangle(int(y*self.g_width), int(x*self.g_height),\
+                int(self.g_width+1), int(self.g_height+1))
+
+
+if __name__ == '__main__':
+
+    try:
+        import pycuda
+        cuda_supp = True
+    except ImportError:
+        cuda_supp = False
+
+    parser = argparse.ArgumentParser(description=\
+            'A Conway\'s Game of Life Simulator written in Python.',\
+            epilog='With GPU support the grid must be bounded '+\
+            '(default is 500x500).')
+
+    parser.add_argument('--no-gpu', dest='no_gpu', action='store_true',
+                   default=False,
+                   help='Disable GPU support')
+
+    parser.add_argument('--n', dest='N', type=int,
+                   help='Number of rows of the grid')
+    parser.add_argument('--m', dest='M', type=int,
+                   help='Number of columns of the grid')
+    
+    args = parser.parse_args()
+
+    print(args.no_gpu, args.N, args.M)
+
+
+    if args.no_gpu or not cuda_supp:
+        if not args.N or not args.M:
+            g = ca.GridGOL()
+        else:
+            g = ca.GridGOL((args.N, args.M))
+    else:
+        if not args.N or not args.M:
+            args.N = 500
+            args.M = 500
+
+        g = ca.GridCudaGOL((500, 500)) #(args.N, args.M))
+
+
+
+    pg = PlayerGrid(g, timeout=100)
+    
+    app = wx.App()
+    f = GridFrame(None, pg)
+    f.Show()
+    app.MainLoop()
