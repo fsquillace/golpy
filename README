@@ -3,7 +3,7 @@ golpy(1)
 
 NAME
 ----
-pyshell - A Conway's Game of Life Simulator written in Python
+golpy - A Conway's Game of Life Simulator written in Python
 
 SYNOPSIS
 --------
@@ -30,7 +30,7 @@ KEY BINDINGS
 ------------
 Navigation
 ~~~~~~~~~~
-The navigation is vim-like [*cntrl+*]'hjkl'.
+The navigation is vim-like [ *cntrl+* ] 'hjkl'.
 Zoom
 ~~~~
 Use the keys '+'(zoom-in) ans '-'(zoom-out).
